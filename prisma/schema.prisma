@@ -1,0 +1,291 @@
+// MediTrack — relational schema (MySQL 8 / InnoDB).
+//
+// MySQL is the system of record for every structured, transactional entity.
+// Native objects that Prisma cannot express (CHECK constraints, triggers,
+// views, stored functions/procedures, FULLTEXT search usage) are added in
+// hand-written SQL inside prisma/migrations so `prisma migrate deploy`
+// reproduces the complete database.
+//
+// Naming: models are PascalCase in TypeScript and mapped to snake_case
+// tables/columns in MySQL. All DATETIME columns hold UTC; DATE columns hold
+// calendar dates (see docs/architecture.md, "Dates and time zones").
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum Role {
+  ADMIN
+  STAFF
+}
+
+enum DosageForm {
+  TABLET
+  CAPSULE
+  SYRUP
+  SUSPENSION
+  INJECTION
+  OINTMENT
+  CREAM
+  DROPS
+  INHALER
+  POWDER
+  OTHER
+}
+
+enum StorageCondition {
+  ROOM_TEMPERATURE
+  COOL_DRY
+  REFRIGERATED
+  FROZEN
+}
+
+/// Header type for non-purchase stock operations.
+enum OperationType {
+  ISSUE
+  WASTE
+  ADJUSTMENT
+}
+
+/// Direction of a ledger movement. Quantities are always positive; the type
+/// decides whether the batch balance goes up or down.
+enum MovementType {
+  STOCK_IN
+  STOCK_OUT
+  WASTE
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+}
+
+enum StockReason {
+  EXPIRED
+  DAMAGED
+  RECALLED
+  CONTAMINATED
+  COUNT_CORRECTION
+  OTHER
+}
+
+model User {
+  id               Int       @id @default(autoincrement())
+  name             String    @db.VarChar(100)
+  email            String    @unique(map: "uq_users_email") @db.VarChar(191)
+  passwordHash     String    @map("password_hash") @db.VarChar(255)
+  role             Role      @default(STAFF)
+  isActive         Boolean   @default(true) @map("is_active")
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until")
+  lastLoginAt      DateTime? @map("last_login_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  sessions          Session[]
+  purchases         Purchase[]
+  stockOperations   StockOperation[]
+  stockTransactions StockTransaction[]
+
+  @@index([role, isActive], map: "idx_users_role_active")
+  @@map("users")
+}
+
+/// Server-side login sessions. Only the SHA-256 hash of the cookie token is
+/// stored, so a database leak does not expose usable session cookies.
+model Session {
+  id        String   @id @db.Char(64)
+  userId    Int      @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  userAgent String?  @map("user_agent") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "fk_sessions_user")
+
+  @@index([userId], map: "idx_sessions_user")
+  @@index([expiresAt], map: "idx_sessions_expires")
+  @@map("sessions")
+}
+
+model Category {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique(map: "uq_categories_name") @db.VarChar(60)
+  description String?  @db.VarChar(255)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  medicines Medicine[]
+
+  @@map("categories")
+}
+
+model Medicine {
+  id               Int              @id @default(autoincrement())
+  name             String           @db.VarChar(120)
+  genericName      String?          @map("generic_name") @db.VarChar(120)
+  categoryId       Int              @map("category_id")
+  manufacturer     String           @db.VarChar(120)
+  dosageForm       DosageForm       @map("dosage_form")
+  strength         String           @db.VarChar(40)
+  unit             String           @default("unit") @db.VarChar(20)
+  storageCondition StorageCondition @default(ROOM_TEMPERATURE) @map("storage_condition")
+  description      String?          @db.VarChar(1000)
+  reorderLevel     Int              @default(0) @map("reorder_level")
+  isActive         Boolean          @default(true) @map("is_active")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  category Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_medicines_category")
+  batches  MedicineBatch[]
+
+  @@unique([name, strength, dosageForm, manufacturer], map: "uq_medicines_identity")
+  @@index([categoryId, isActive], map: "idx_medicines_category_active")
+  @@index([isActive, name], map: "idx_medicines_active_name")
+  @@fulltext([name, genericName, manufacturer], map: "ft_medicines_search")
+  @@map("medicines")
+}
+
+model Supplier {
+  id            Int      @id @default(autoincrement())
+  name          String   @unique(map: "uq_suppliers_name") @db.VarChar(120)
+  contactPerson String?  @map("contact_person") @db.VarChar(100)
+  phone         String   @db.VarChar(20)
+  email         String?  @db.VarChar(191)
+  address       String   @db.VarChar(255)
+  licenseNumber String?  @unique(map: "uq_suppliers_license") @map("license_number") @db.VarChar(50)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  purchases Purchase[]
+
+  @@index([isActive, name], map: "idx_suppliers_active_name")
+  @@map("suppliers")
+}
+
+/// One physical lot of a medicine. `quantity` is the on-hand balance and is
+/// changed ONLY by the trg_stock_transactions_before_insert trigger.
+model MedicineBatch {
+  id              Int      @id @default(autoincrement())
+  medicineId      Int      @map("medicine_id")
+  batchNumber     String   @map("batch_number") @db.VarChar(50)
+  manufactureDate DateTime @map("manufacture_date") @db.Date
+  expiryDate      DateTime @map("expiry_date") @db.Date
+  quantity        Int      @default(0)
+  unitCost        Decimal  @map("unit_cost") @db.Decimal(10, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  medicine      Medicine           @relation(fields: [medicineId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_batches_medicine")
+  purchaseItems PurchaseItem[]
+  transactions  StockTransaction[]
+
+  @@unique([medicineId, batchNumber], map: "uq_batches_medicine_number")
+  @@index([medicineId, expiryDate], map: "idx_batches_fefo")
+  @@index([expiryDate], map: "idx_batches_expiry")
+  @@map("medicine_batches")
+}
+
+model Purchase {
+  id             Int      @id @default(autoincrement())
+  supplierId     Int      @map("supplier_id")
+  invoiceNumber  String   @map("invoice_number") @db.VarChar(50)
+  purchaseDate   DateTime @map("purchase_date") @db.Date
+  receivedById   Int      @map("received_by_id")
+  notes          String?  @db.VarChar(500)
+  idempotencyKey String   @unique(map: "uq_purchases_idempotency") @map("idempotency_key") @db.Char(36)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  supplier   Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_purchases_supplier")
+  receivedBy User           @relation(fields: [receivedById], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_purchases_user")
+  items      PurchaseItem[]
+
+  @@unique([supplierId, invoiceNumber], map: "uq_purchases_supplier_invoice")
+  @@index([purchaseDate], map: "idx_purchases_date")
+  @@index([receivedById], map: "idx_purchases_received_by")
+  @@map("purchases")
+}
+
+/// A line on a purchase invoice. The medicine is reached through the batch
+/// (purchase_item -> medicine_batch -> medicine), which keeps the table in 3NF.
+model PurchaseItem {
+  id         Int      @id @default(autoincrement())
+  purchaseId Int      @map("purchase_id")
+  batchId    Int      @map("batch_id")
+  quantity   Int
+  unitCost   Decimal  @map("unit_cost") @db.Decimal(10, 2)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  purchase Purchase          @relation(fields: [purchaseId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_purchase_items_purchase")
+  batch    MedicineBatch     @relation(fields: [batchId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_purchase_items_batch")
+  stockIn  StockTransaction?
+
+  @@unique([purchaseId, batchId], map: "uq_purchase_items_purchase_batch")
+  @@index([batchId], map: "idx_purchase_items_batch")
+  @@map("purchase_items")
+}
+
+/// Header for an issue, waste write-off or adjustment. Groups the ledger rows
+/// it produced (a FEFO issue can consume several batches).
+model StockOperation {
+  id             Int           @id @default(autoincrement())
+  type           OperationType
+  idempotencyKey String        @unique(map: "uq_operations_idempotency") @map("idempotency_key") @db.Char(36)
+  performedById  Int           @map("performed_by_id")
+  destination    String?       @db.VarChar(120)
+  reason         StockReason?
+  notes          String?       @db.VarChar(500)
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  performedBy  User               @relation(fields: [performedById], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_operations_user")
+  transactions StockTransaction[]
+
+  @@index([type, createdAt], map: "idx_operations_type_created")
+  @@index([performedById], map: "idx_operations_user")
+  @@map("stock_operations")
+}
+
+/// Append-only stock ledger. Every change to medicine_batches.quantity has
+/// exactly one row here; UPDATE and DELETE are rejected by triggers.
+model StockTransaction {
+  id             Int          @id @default(autoincrement())
+  batchId        Int          @map("batch_id")
+  type           MovementType
+  quantity       Int
+  balanceAfter   Int          @default(0) @map("balance_after")
+  performedById  Int          @map("performed_by_id")
+  purchaseItemId Int?         @unique(map: "uq_transactions_purchase_item") @map("purchase_item_id")
+  operationId    Int?         @map("operation_id")
+  notes          String?      @db.VarChar(500)
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  batch        MedicineBatch   @relation(fields: [batchId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_transactions_batch")
+  performedBy  User            @relation(fields: [performedById], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_transactions_user")
+  purchaseItem PurchaseItem?   @relation(fields: [purchaseItemId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_transactions_purchase_item")
+  operation    StockOperation? @relation(fields: [operationId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "fk_transactions_operation")
+
+  @@index([batchId, createdAt], map: "idx_transactions_batch_created")
+  @@index([type, createdAt], map: "idx_transactions_type_created")
+  @@index([createdAt], map: "idx_transactions_created")
+  @@index([performedById], map: "idx_transactions_user")
+  @@index([operationId], map: "idx_transactions_operation")
+  @@map("stock_transactions")
+}
+
+/// Transactional outbox: audit events are written here inside the same MySQL
+/// transaction as the business change, then delivered to MongoDB
+/// (activity_logs). Undelivered rows are retried, so no event is lost.
+model AuditOutbox {
+  id          Int       @id @default(autoincrement())
+  payload     Json
+  attempts    Int       @default(0)
+  lastError   String?   @map("last_error") @db.VarChar(500)
+  deliveredAt DateTime? @map("delivered_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([deliveredAt, id], map: "idx_outbox_pending")
+  @@map("audit_outbox")
+}
