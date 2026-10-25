@@ -1,0 +1,51 @@
+%% MediTrack — system architecture
+flowchart LR
+    subgraph Browser["Browser (React 19 client components)"]
+        UI["Pages & forms<br/>dashboard, inventory, alerts, incidents"]
+    end
+
+    subgraph Next["Next.js 16 server (Node.js runtime)"]
+        Proxy["proxy.ts<br/>optimistic cookie check"]
+        RSC["Server Components<br/>(pages, request-time rendering)"]
+        Actions["Server Actions<br/>(form mutations)"]
+        API["Route Handlers /api/*<br/>(JSON, Origin check)"]
+        Auth["Session & RBAC<br/>requireUser / requireActor / assertCan"]
+        Services["Service layer<br/>catalog · purchases · stock (FEFO) · inventory/alerts<br/>incidents · audit (outbox) · users · inspector"]
+        Validation["Zod validation"]
+    end
+
+    subgraph MySQL["MySQL 8.4 — InnoDB (system of record)"]
+        Tables["11 tables<br/>PK / FK / UNIQUE / CHECK / indexes / FULLTEXT"]
+        Triggers["Triggers<br/>ledger → batch quantity, append-only ledger"]
+        Views["Views<br/>v_inventory_summary, v_batch_stock, v_low_stock_medicines …"]
+        Procs["Stored functions & procedures<br/>sp_expiring_batches, sp_write_off_expired"]
+        Outbox["audit_outbox<br/>(transactional outbox)"]
+        Event["Event ev_purge_expired_sessions"]
+    end
+
+    subgraph Mongo["MongoDB 8 (documents)"]
+        Incidents["incident_reports<br/>$jsonSchema, text index, embedded timeline"]
+        Activity["activity_logs<br/>audit events"]
+        Counters["counters<br/>INC-##### sequence"]
+    end
+
+    UI -- "HTTPS, HttpOnly session cookie" --> Proxy
+    Proxy --> RSC
+    Proxy --> Actions
+    Proxy --> API
+    RSC --> Auth
+    Actions --> Auth
+    API --> Auth
+    Auth --> Services
+    Actions --> Validation
+    API --> Validation
+    Validation --> Services
+    Services -- "Prisma ORM + MariaDB driver<br/>transactions, FOR UPDATE, CALL" --> Tables
+    Tables --- Triggers
+    Tables --- Views
+    Tables --- Procs
+    Tables --- Outbox
+    Tables --- Event
+    Services -- "official MongoDB driver" --> Incidents
+    Services --> Counters
+    Outbox -- "flushOutbox(): idempotent upsert<br/>retried until delivered" --> Activity

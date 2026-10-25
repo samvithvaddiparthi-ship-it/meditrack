@@ -1,0 +1,131 @@
+%% MediTrack — ER diagram of the implemented MySQL schema (prisma/schema.prisma + migrations).
+%% PK = primary key, FK = foreign key, UK = unique key. Render with any Mermaid viewer.
+erDiagram
+    USERS {
+        int id PK
+        varchar name
+        varchar email UK
+        varchar password_hash
+        enum role "ADMIN | STAFF"
+        boolean is_active
+        int failed_login_count
+        datetime locked_until
+        datetime last_login_at
+        datetime created_at
+        datetime updated_at
+    }
+    SESSIONS {
+        char id PK "SHA-256 of cookie token"
+        int user_id FK
+        datetime expires_at
+        varchar user_agent
+        datetime created_at
+    }
+    CATEGORIES {
+        int id PK
+        varchar name UK
+        varchar description
+        datetime created_at
+        datetime updated_at
+    }
+    MEDICINES {
+        int id PK
+        varchar name "UK(name,strength,dosage_form,manufacturer)"
+        varchar generic_name
+        int category_id FK
+        varchar manufacturer
+        enum dosage_form
+        varchar strength
+        varchar unit
+        enum storage_condition
+        varchar description
+        int reorder_level "CHECK >= 0"
+        boolean is_active
+        datetime created_at
+        datetime updated_at
+    }
+    SUPPLIERS {
+        int id PK
+        varchar name UK
+        varchar contact_person
+        varchar phone "CHECK format"
+        varchar email
+        varchar address
+        varchar license_number UK
+        boolean is_active
+        datetime created_at
+        datetime updated_at
+    }
+    MEDICINE_BATCHES {
+        int id PK
+        int medicine_id FK "UK(medicine_id,batch_number)"
+        varchar batch_number
+        date manufacture_date
+        date expiry_date "CHECK > manufacture_date"
+        int quantity "CHECK >= 0; trigger-maintained"
+        decimal unit_cost "CHECK >= 0"
+        datetime created_at
+        datetime updated_at
+    }
+    PURCHASES {
+        int id PK
+        int supplier_id FK "UK(supplier_id,invoice_number)"
+        varchar invoice_number
+        date purchase_date
+        int received_by_id FK
+        varchar notes
+        char idempotency_key UK
+        datetime created_at
+        datetime updated_at
+    }
+    PURCHASE_ITEMS {
+        int id PK
+        int purchase_id FK "UK(purchase_id,batch_id)"
+        int batch_id FK
+        int quantity "CHECK > 0"
+        decimal unit_cost "CHECK >= 0"
+        datetime created_at
+    }
+    STOCK_OPERATIONS {
+        int id PK
+        enum type "ISSUE | WASTE | ADJUSTMENT"
+        char idempotency_key UK
+        int performed_by_id FK
+        varchar destination "required for ISSUE"
+        enum reason "required for WASTE/ADJUSTMENT"
+        varchar notes
+        datetime created_at
+    }
+    STOCK_TRANSACTIONS {
+        int id PK
+        int batch_id FK
+        enum type "STOCK_IN | STOCK_OUT | WASTE | ADJUSTMENT_IN | ADJUSTMENT_OUT"
+        int quantity "CHECK > 0"
+        int balance_after "set by trigger"
+        int performed_by_id FK
+        int purchase_item_id FK "UK; STOCK_IN only"
+        int operation_id FK "non STOCK_IN"
+        varchar notes
+        datetime created_at
+    }
+    AUDIT_OUTBOX {
+        int id PK
+        json payload
+        int attempts
+        varchar last_error
+        datetime delivered_at
+        datetime created_at
+    }
+
+    USERS ||--o{ SESSIONS : "has"
+    CATEGORIES ||--o{ MEDICINES : "classifies"
+    MEDICINES ||--o{ MEDICINE_BATCHES : "is stocked as"
+    SUPPLIERS ||--o{ PURCHASES : "supplies"
+    USERS ||--o{ PURCHASES : "receives"
+    PURCHASES ||--|{ PURCHASE_ITEMS : "contains"
+    MEDICINE_BATCHES ||--o{ PURCHASE_ITEMS : "received via"
+    PURCHASE_ITEMS ||--o| STOCK_TRANSACTIONS : "produces exactly one STOCK_IN"
+    MEDICINE_BATCHES ||--o{ STOCK_TRANSACTIONS : "moves in"
+    USERS ||--o{ STOCK_TRANSACTIONS : "performs"
+    USERS ||--o{ STOCK_OPERATIONS : "performs"
+    STOCK_OPERATIONS ||--|{ STOCK_TRANSACTIONS : "groups"
