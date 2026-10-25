@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+/*
+ * MediTrack design tokens. A calm clinical palette: teal primary, slate
+ * neutrals, and semantic colours for stock status (red = expired / out,
+ * amber = expiring / low, green = available).
+ */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-brand-50: #effaf8;
+  --color-brand-100: #d6f2ec;
+  --color-brand-200: #aee3d8;
+  --color-brand-300: #7ccdbf;
+  --color-brand-500: #1f9e8a;
+  --color-brand-600: #137f6f;
+  --color-brand-700: #10665a;
+  --color-brand-800: #0f524a;
+  --color-brand-900: #0d3f3a;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  background: #f6f8fa;
+  color: #0f172a;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Visible keyboard focus everywhere. */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+}
+
+dialog::backdrop {
+  background: rgb(15 23 42 / 0.45);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
