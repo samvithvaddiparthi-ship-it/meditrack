@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import * as mariadb from "mariadb";
+import { mysqlAuthOptions } from "../../src/lib/mysql-url";
 import { testDatabaseConfig } from "./test-env";
 
 /**
@@ -15,6 +16,7 @@ export default async function setup() {
     port: Number(url.port || 3306),
     user: decodeURIComponent(url.username),
     password: decodeURIComponent(url.password),
+    ...mysqlAuthOptions(url),
   });
   try {
     await conn.query(`DROP DATABASE IF EXISTS \`${dbName}\``);

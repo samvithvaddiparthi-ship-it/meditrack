@@ -3,6 +3,7 @@ import * as mariadb from "mariadb";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { PrismaClient, type Prisma } from "@/generated/prisma/client";
 import { env } from "@/lib/env";
+import { mysqlAuthOptions } from "@/lib/mysql-url";
 
 /**
  * One MySQL connection pool shared by Prisma (through the MariaDB driver
@@ -31,6 +32,7 @@ function poolConfigFromUrl(databaseUrl: string): mariadb.PoolConfig {
     // Sessions use UTC, matching how DATETIME values are stored.
     timezone: "Z",
     connectTimeout: 10_000,
+    ...mysqlAuthOptions(url),
   };
 }
 

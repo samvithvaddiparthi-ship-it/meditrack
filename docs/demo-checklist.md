@@ -52,5 +52,5 @@
 
 ## 7. Reports, tests, contributions (2 min)
 - [ ] Reports page: GROUP BY / HAVING / NOT EXISTS / derived-table queries, reconciliation = 0 mismatches.
-- [ ] `npm test` → 96 passed (or show docs/test-report.md).
+- [ ] `npm test` → 98 passed (or show docs/test-report.md).
 - [ ] Individual contributions: docs/team-contributions.md and the Git history.

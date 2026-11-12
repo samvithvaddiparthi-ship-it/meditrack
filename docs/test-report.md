@@ -1,6 +1,6 @@
 # Test Report — MediTrack
 
-Executed on **25 Oct 2026** on macOS (arm64), Node.js 24.13, MySQL 8.4.13 and
+Executed on **25 Oct 2026**, re-run on **1 Nov 2026** after a cold MySQL restart on macOS (arm64), Node.js 24.13, MySQL 8.4.13 and
 MongoDB 8.0 (Docker), Next.js 16.4.3. All results below are from real runs;
 nothing is mocked except the `server-only` import guard.
 
@@ -10,9 +10,9 @@ nothing is mocked except the `server-only` import guard.
 |---|---|---|
 | Type checking | `npm run typecheck` (`next typegen && tsc --noEmit`) | ✅ 0 errors |
 | Linting | `npm run lint` (ESLint, next/core-web-vitals + TypeScript rules) | ✅ 0 errors, 0 warnings |
-| Unit tests | `npm run test:unit` | ✅ 40 / 40 passed (5 files) |
+| Unit tests | `npm run test:unit` | ✅ 42 / 42 passed (6 files) |
 | Integration tests | `npm run test:integration` | ✅ 56 / 56 passed (9 files, real MySQL + MongoDB) |
-| All tests | `npm test` | ✅ **96 / 96 passed** (14 files, ~50 s) |
+| All tests | `npm test` | ✅ **98 / 98 passed** (15 files, ~50 s) |
 | Production build | `npm run build` | ✅ compiled, 46 routes, no warnings |
 | End-to-end smoke test + screenshots | `npm run screenshots` against `next start` | ✅ 26 pages rendered without errors; staff `POST /api/medicines` → 403 |
 | Schema drift | `prisma migrate diff` (migrations ↔ schema, live DB ↔ schema) | ✅ empty diff both ways |
@@ -50,13 +50,14 @@ against any database whose name does not end in `_test`.
 | + | Dashboard metrics from live data | alerts › dashboard metrics are computed from the live tables and views | ✅ |
 | + | Safe error messages | errors-and-audit › database error mapping (5 tests) · audit detail sanitising | ✅ |
 
-## Full list of executed tests (96)
+## Full list of executed tests (98)
 
-**Unit (40)** — `tests/unit`
+**Unit (42)** — `tests/unit`
 - `fefo.test.ts` (7): takes the earliest-expiring batch first · spans several batches in expiry order when one is not enough · excludes expired batches, including one that expires today · excludes depleted batches · reports a shortfall instead of over-allocating · breaks expiry ties by batch id · rejects zero and negative quantities
 - `dates.test.ts` (6): rolls over to the next calendar day at 18:30 UTC · validates calendar dates strictly · counts days until expiry · DEPLETED whenever quantity is zero · EXPIRED on and after the expiry date · EXPIRING_SOON inside the window and AVAILABLE outside it
 - `validation.test.ts` (15): medicine (4) · purchase (5) · stock operation (2) · account (2) · incident (2)
 - `permissions.test.ts` (4): admin has all permissions · staff day-to-day permissions · management functions denied to staff · assertCan throws ForbiddenError
+- `mysql-url.test.ts` (2): RSA public-key retrieval allowed on loopback hosts only · explicit URL parameter honoured
 - `errors-and-audit.test.ts` (8): trigger SIGNAL messages · mariadb driver prefixes · CHECK violations → friendly text · unique index identification · unknown errors never leaked · credential keys dropped from audit details · full-text query builder (2)
 
 **Integration (56)** — `tests/integration` (real MySQL 8.4 + MongoDB 8)
