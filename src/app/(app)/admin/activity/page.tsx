@@ -4,9 +4,9 @@ import { activitySummary, listActivity, outboxBacklog } from "@/server/services/
 import { listUserOptions } from "@/server/services/users.service";
 import { ServiceUnavailableError } from "@/lib/errors";
 import { formatDateTime } from "@/lib/dates";
+import { actionLabel } from "@/lib/activity-labels";
 import { Alert, Card, CardBody, CardHeader, EmptyState, PageHeader, Table, TBody, Td, Th } from "@/components/ui/primitives";
 import { FilterBar, FilterSelect, Pagination, first, intParam, type SearchParams } from "@/components/ui/list";
-import { RoleBadge } from "@/components/ui/status";
 import { BarList } from "@/components/charts";
 
 export const metadata: Metadata = { title: "Activity log" };
@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: "Activity log" };
 export default async function ActivityPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const user = await requirePageAccess("audit:view");
   const params = await searchParams;
-  const filters = { action: first(params.action)?.slice(0, 60), entityType: first(params.entity)?.slice(0, 40), actorId: intParam(params.user), page: intParam(params.page) ?? 1 };
+  const filters = { action: first(params.action)?.slice(0, 60), actorId: intParam(params.user), page: intParam(params.page) ?? 1 };
   const [users, backlog] = await Promise.all([listUserOptions(), outboxBacklog()]);
   let data: Awaited<ReturnType<typeof listActivity>> | null = null;
   let summary: Awaited<ReturnType<typeof activitySummary>> = [];
@@ -26,63 +26,57 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader
-        title="Activity & audit log"
-        description="Events stored in MongoDB (activity_logs). They are written to the MySQL audit_outbox inside each business transaction and then delivered, so no event is lost if MongoDB is briefly down. Passwords, tokens and connection strings are never recorded."
-      />
+      <PageHeader title="Activity log" description="Who did what, and when. Every sign-in, stock movement, incident and change is recorded here automatically, newest first." />
       {backlog > 0 ? (
         <Alert tone="warning" className="mb-4">
-          {backlog} event(s) are waiting in the MySQL outbox and will be delivered when MongoDB is reachable.
+          {backlog} recent action(s) will appear here shortly.
         </Alert>
       ) : null}
       {data === null ? (
-        <Alert tone="danger">MongoDB is unreachable, so the activity log cannot be displayed. Inventory operations continue normally.</Alert>
+        <Alert tone="danger">The activity log is unavailable right now (MongoDB cannot be reached). Everything else in the app still works.</Alert>
       ) : (
         <>
           <Card>
-            <CardHeader title="Events by action, last 30 days" description="MongoDB aggregation: $match → $group by action → $sort" />
+            <CardHeader title="What happened in the last 30 days" description="How many times each kind of action happened" />
             <CardBody>
-              {summary.length === 0 ? <EmptyState title="No events in the last 30 days" /> : <BarList title="Events by action" categoryLabel="Action" valueLabel="Events" rows={summary.slice(0, 10).map((s) => ({ label: s.action, value: s.count }))} />}
+              {summary.length === 0 ? (
+                <EmptyState title="Nothing in the last 30 days" />
+              ) : (
+                <BarList title="Actions in the last 30 days" categoryLabel="Action" valueLabel="Times" rows={summary.slice(0, 10).map((s) => ({ label: actionLabel(s.action), value: s.count }))} />
+              )}
             </CardBody>
           </Card>
+
           <Card className="mt-6">
             <FilterBar resetHref="/admin/activity">
-              <FilterSelect label="Action" name="action" defaultValue={filters.action ?? ""} options={[{ value: "", label: "All actions" }, ...data.actions.map((a) => ({ value: a, label: a }))]} className="lg:w-56" />
-              <FilterSelect label="Entity" name="entity" defaultValue={filters.entityType ?? ""} options={[{ value: "", label: "All entities" }, ...data.entityTypes.map((a) => ({ value: a, label: a }))]} />
-              <FilterSelect label="User" name="user" defaultValue={filters.actorId ? String(filters.actorId) : ""} options={[{ value: "", label: "Anyone" }, ...users.map((u) => ({ value: String(u.id), label: u.label }))]} />
+              <FilterSelect
+                label="Type of action"
+                name="action"
+                defaultValue={filters.action ?? ""}
+                options={[{ value: "", label: "All actions" }, ...data.actions.map((a) => ({ value: a, label: actionLabel(a) })).sort((a, b) => a.label.localeCompare(b.label))]}
+                className="lg:w-64"
+              />
+              <FilterSelect label="Person" name="user" defaultValue={filters.actorId ? String(filters.actorId) : ""} options={[{ value: "", label: "Everyone" }, ...users.map((u) => ({ value: String(u.id), label: u.label }))]} />
             </FilterBar>
             {data.entries.length === 0 ? (
-              <EmptyState title="No events match these filters" />
+              <EmptyState title="Nothing matches these filters" />
             ) : (
               <Table caption="Activity log">
                 <thead>
                   <tr>
                     <Th>When</Th>
                     <Th>Who</Th>
-                    <Th>Action</Th>
-                    <Th>Summary</Th>
-                    <Th>Entity</Th>
+                    <Th>What happened</Th>
                   </tr>
                 </thead>
                 <TBody>
                   {data.entries.map((e) => (
                     <tr key={e.id}>
-                      <Td className="whitespace-nowrap text-xs text-slate-500">{formatDateTime(e.createdAt)}</Td>
-                      <Td className="text-xs">
-                        {e.actor ? (
-                          <span className="flex flex-col items-start gap-1">
-                            {e.actor.name}
-                            <RoleBadge role={e.actor.role} />
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">anonymous</span>
-                        )}
-                      </Td>
-                      <Td className="font-mono text-xs">{e.action}</Td>
-                      <Td className="text-sm">{e.summary}</Td>
-                      <Td className="font-mono text-xs text-slate-500">
-                        {e.entityType}
-                        {e.entityId ? `#${e.entityId.length > 10 ? `${e.entityId.slice(0, 8)}…` : e.entityId}` : ""}
+                      <Td className="whitespace-nowrap text-sm text-slate-500">{formatDateTime(e.createdAt)}</Td>
+                      <Td className="whitespace-nowrap text-sm">{e.actor ? e.actor.name : <span className="text-slate-400">Unknown person</span>}</Td>
+                      <Td>
+                        <p className="text-sm font-semibold text-slate-900">{actionLabel(e.action)}</p>
+                        <p className="text-sm text-slate-600">{e.summary}</p>
                       </Td>
                     </tr>
                   ))}
@@ -91,6 +85,24 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
             )}
             <Pagination pathname="/admin/activity" params={params} page={data.page} pageSize={data.pageSize} total={data.total} />
           </Card>
+
+          <details className="mt-6 rounded-xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-700 shadow-sm">
+            <summary className="cursor-pointer font-semibold text-slate-900">How this works (for the viva)</summary>
+            <ul className="mt-3 list-disc space-y-2 pl-5">
+              <li>
+                Each entry is one document in the MongoDB collection <code>activity_logs</code>.
+              </li>
+              <li>
+                The chart is a MongoDB aggregation: <code>$match</code> (last 30 days) → <code>$group</code> by action and count → <code>$sort</code>, the
+                same idea as SQL&apos;s WHERE, GROUP BY and ORDER BY.
+              </li>
+              <li>
+                An entry is first saved in the MySQL table <code>audit_outbox</code> in the same transaction as the change, then copied to MongoDB. If
+                MongoDB is down it waits and is copied later, so nothing is lost (the outbox pattern).
+              </li>
+              <li>Passwords, tokens and connection strings are never recorded.</li>
+            </ul>
+          </details>
         </>
       )}
     </>
